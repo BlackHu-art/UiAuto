@@ -1,0 +1,17 @@
+requests==2.27.1
+Appium-Python-Client==0.48
+selenium~=3.141.0
+Pillow~=10.4.0
+scikit-image~=0.24.0
+opencv-python~=4.10.0.84
+ujson~=5.10.0
+# pytest
+pytest==8.0.2
+pytest-ordering==0.6
+# database
+PyMySQL==1.1.1
+SQLAlchemy==2.0.35
+loguru~=0.7.2
+PyYAML~=6.0.2
+pytz~=2024.2
+websocket-client~=1.8.0

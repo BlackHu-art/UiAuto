@@ -1,0 +1,11 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+# 生产账号及密码
+USERINFO_PRO:
+  ACCOUNT01: frankieblrs@gmail.com
+  APASSWRD01: '000000'
+  ACCOUNT02: frankieblrs0@gmail.com
+  APASSWRD02: '000000'
+  PHONE01: +8613800000000
+  PPASSWRD01: '000000'

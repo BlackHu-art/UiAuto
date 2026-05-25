@@ -1,0 +1,10 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+# 生产账号及验证码
+userRegisterInfoPro:
+  account: i9s0o5@nm123.com
+  verifyCode: '1790'
+  password: '000000'
+  fingerprint: "4794d495216cb6f6f1c31bc4fcbfc771"
+

@@ -1,0 +1,24 @@
+B11_132:
+  platformName: Android
+  automationName: UiAutomator2
+  platformVersion: '9'
+  deviceName: 10.0.0.195:5555
+  systemport: '8200'
+  appActivity: com.mm.droid.livetv.normal
+  appPackage: com.mm.droid.livetv.stb31023418
+  app: http://10.0.0.126:8000/packages/doozy_tv/DoozyTV_2.1.3_20240717_stb.apk
+  noSign: true
+  fullReset: false
+  noReset: true
+MiBox4_195:
+  platformName: Android
+  automationName: UiAutomator2
+  platformVersion: '12'
+  deviceName: 10.0.0.195:5555
+  systemport: '8200'
+  appActivity: com.mm.droid.livetv.load.LiveLoadActivity
+  appPackage: com.mm.droid.livetv.stb31023418
+  app: http://10.0.0.126:8000/packages/doozy_tv/DoozyTV_2.1.3_20240717_stb.apk
+  noSign: true
+  fullReset: false
+  noReset: true
