@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(java *)",
+      "Bash(adb version *)",
+      "Bash(appium *)",
+      "Bash(adb devices *)",
+      "Bash(npm install *)",
+      "Bash(npm view *)",
+      "Bash(python *)",
+      "Bash(aapt dump *)",
+      "Bash(adb -s emulator-5554 shell pm path com.mm.droid.livetv.stb31023418)",
+      "Bash(adb -s emulator-5554 shell cmd package resolve-activity --brief com.mm.droid.livetv.stb31023418)",
+      "Bash(PYTHONPATH=src python *)",
+      "Bash(allure *)",
+      "Bash(where allure *)",
+      "Bash(git *)",
+      "Bash(powershell.exe *)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "filesystem",
+    "memory",
+    "brave-search",
+    "github",
+    "postgres"
+  ],
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": false
+  }
+}

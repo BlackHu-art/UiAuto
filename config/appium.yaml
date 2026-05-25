@@ -1,0 +1,43 @@
+server_url: "http://127.0.0.1:4723"
+
+appium:
+  manage_servers: true
+  reuse_existing_servers: false
+  cleanup_stale_servers: true
+  host: "127.0.0.1"
+  base_port: 4723
+  start_timeout_seconds: 30
+  startup_poll_interval_seconds: 1
+  stop_timeout_seconds: 10
+
+android:
+  platform_name: "Android"
+  automation_name: "UiAutomator2"
+  app: "apps/DoozyTV_2.1.5_20241011_stb.apk"
+  app_package: "com.mm.droid.livetv.stb31023418"
+  app_activity: "com.mm.droid.livetv.freetrial"
+  app_wait_activity: "*"
+  no_reset: false
+  auto_grant_permissions: true
+  new_command_timeout: 120
+  adb_exec_timeout: 60000
+  session_start_retries: 3
+  session_retry_backoff_seconds: 5
+  devices:
+    - name: "emulator_5554"
+      udid: "emulator-5554"
+      device_name: "Android Emulator 5554"
+      appium_port: 4723
+      system_port: 8200
+      chromedriver_port: 9515
+      mjpeg_server_port: 7810
+    - name: "emulator_5556"
+      udid: "emulator-5556"
+      device_name: "Android Emulator 5556"
+      appium_port: 4724
+      system_port: 8201
+      chromedriver_port: 9516
+      mjpeg_server_port: 7811
+
+smoke:
+  accessibility_id: ""
