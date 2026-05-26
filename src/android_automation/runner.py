@@ -12,7 +12,7 @@ from urllib.request import urlopen
 from android_automation.adb import list_adb_devices, online_udids, wait_for_device
 from android_automation.artifacts import split_allure_results_by_device, write_allure_environment, write_run_metadata
 from android_automation.config import AndroidDeviceSettings, ConfigError
-from android_automation.logging_config import initialize_log_session, setup_logging
+from android_automation.logging_config import initialize_log_session, setup_logging, write_combined_log
 from android_automation.runtime import ExecutionContext, load_execution_context
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ class RunnerOptions:
     appium_config: str
     device_selectors: list[str]
     all_devices: bool
+    connected_devices: bool
+    skip_offline_devices: bool
     framework_log_level: str
     report_dir: Path
     allure_results_dir: Path | None
@@ -36,15 +38,17 @@ class RunnerOptions:
 
 def main(argv: list[str] | None = None) -> int:
     options = _parse_runner_options(list(argv or []))
-    initialize_log_session(options.report_dir / "logs" / "master.log", reset=True)
+    initialize_log_session(options.report_dir / "logs" / "runner.log", reset=True)
     # 主进程日志写入当天目录，避免不同日期运行混在一起。
-    setup_logging(options.framework_log_level, options.report_dir / "logs" / "master.log")
+    setup_logging(options.framework_log_level, options.report_dir / "logs" / "runner.log")
 
     try:
         execution = load_execution_context(
             config_path=options.appium_config,
             device_selectors=options.device_selectors,
             all_devices=options.all_devices,
+            connected_devices=options.connected_devices,
+            skip_offline_devices=options.skip_offline_devices,
             validate_app=not options.list_devices,
         )
         execution.apply_environment()
@@ -53,11 +57,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if options.list_devices:
-        _print_devices(execution.settings.devices)
+        _print_devices(execution.devices)
         return 0
 
     preflight_code = _run_preflight(execution, options)
     if options.preflight or preflight_code != 0:
+        combined_log = write_combined_log(options.report_dir)
+        if combined_log:
+            LOGGER.info("Combined log generated: %s", combined_log)
         return preflight_code
 
     pytest_args = _build_pytest_args(options, execution.devices)
@@ -68,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
 
     exit_code = int(pytest.main(pytest_args))
     LOGGER.info("Android UI automation finished with exit code %s", exit_code)
+    combined_log = write_combined_log(options.report_dir)
+    if combined_log:
+        LOGGER.info("Combined log generated: %s", combined_log)
 
     _generate_allure_reports(options, execution)
     return exit_code
@@ -77,6 +87,8 @@ def _parse_runner_options(args: list[str]) -> RunnerOptions:
     # runner 只解析框架自身参数，其余参数透传给 pytest。
     parser = _create_runner_parser()
     parsed, pytest_args = parser.parse_known_args(args)
+    if parsed.connected_devices and (parsed.all_devices or parsed.device):
+        parser.error("--connected-devices cannot be combined with --all-devices or --device")
 
     report_dir = Path(parsed.report_dir)
     no_allure = parsed.no_allure
@@ -91,6 +103,8 @@ def _parse_runner_options(args: list[str]) -> RunnerOptions:
         appium_config=parsed.appium_config,
         device_selectors=list(parsed.device),
         all_devices=parsed.all_devices,
+        connected_devices=parsed.connected_devices,
+        skip_offline_devices=parsed.skip_offline_devices,
         framework_log_level=parsed.framework_log_level,
         report_dir=report_dir,
         allure_results_dir=allure_results,
@@ -112,12 +126,17 @@ def _build_pytest_args(options: RunnerOptions, selected_devices: tuple[AndroidDe
         args.append(f"--report-dir={options.report_dir}")
     if not _has_option(args, "--framework-log-level"):
         args.append(f"--framework-log-level={options.framework_log_level}")
-    if options.all_devices:
+    if _uses_connected_device_discovery(options):
+        if "--connected-devices" not in args:
+            args.append("--connected-devices")
+    elif options.all_devices:
         if "--all-devices" not in args:
             args.append("--all-devices")
     else:
         for selector in options.device_selectors:
             args.extend(["--device", selector])
+    if options.skip_offline_devices and "--skip-offline-devices" not in args:
+        args.append("--skip-offline-devices")
 
     if options.allure_results_dir:
         _reset_directory(options.allure_results_dir)
@@ -148,6 +167,14 @@ def _run_preflight(execution: ExecutionContext, options: RunnerOptions) -> int:
         settings.session_start_retries,
         settings.adb_exec_timeout,
     )
+    for skipped in execution.skipped_devices:
+        LOGGER.warning(
+            "Skipped device before preflight: device=%s udid=%s state=%s reason=%s",
+            skipped.name,
+            skipped.udid,
+            skipped.state,
+            skipped.reason,
+        )
 
     if settings.app_path and not settings.app_path.exists():
         LOGGER.error("Preflight failed: APK not found: %s", settings.app_path)
@@ -164,25 +191,26 @@ def _run_preflight(execution: ExecutionContext, options: RunnerOptions) -> int:
     online_devices = online_udids(settings)
     for device in devices:
         if device.udid and device.udid not in online_devices:
-            LOGGER.warning("Device not online in initial adb list, waiting once: %s (%s)", device.name, device.udid)
+            LOGGER.warning("Device not online in initial adb list, waiting once: device=%s udid=%s", device.name, device.udid)
             if wait_for_device(settings, device):
                 online_devices = online_udids(settings)
 
         if device.udid and device.udid not in online_devices:
-            LOGGER.error("Preflight failed: device offline or missing: %s (%s)", device.name, device.udid)
+            LOGGER.error("Preflight failed: device offline or missing: device=%s udid=%s", device.name, device.udid)
             ok = False
         else:
-            LOGGER.info("Preflight device OK: %s (%s)", device.name, device.udid)
+            LOGGER.info("Preflight device OK: device=%s udid=%s", device.name, device.udid)
 
-    for server_url in sorted({device.server_url or settings.server_url for device in devices}):
+    for device in devices:
+        server_url = device.server_url or settings.server_url
         if settings.appium_service.manage_servers and _is_managed_server(execution, server_url):
-            LOGGER.info("Preflight Appium server will be managed by the runner: %s", server_url)
+            LOGGER.info("Preflight Appium server will be managed by the runner: device=%s server=%s", device.name, server_url)
             continue
         if not _server_reachable(server_url):
-            LOGGER.error("Preflight failed: Appium server is not reachable: %s", server_url)
+            LOGGER.error("Preflight failed: Appium server is not reachable: device=%s server=%s", device.name, server_url)
             ok = False
         else:
-            LOGGER.info("Preflight Appium server OK: %s", server_url)
+            LOGGER.info("Preflight Appium server OK: device=%s server=%s", device.name, server_url)
 
     if options.allure_results_dir and _allure_executable() is None:
         LOGGER.warning("Allure CLI not found. Raw results will be kept, but HTML report generation will be skipped.")
@@ -265,7 +293,13 @@ def _generate_single_allure_report(
 
 
 def _write_metadata(options: RunnerOptions, execution: ExecutionContext, pytest_args: list[str]) -> None:
-    write_run_metadata(options.report_dir, execution.settings, execution.devices, pytest_args)
+    write_run_metadata(
+        options.report_dir,
+        execution.settings,
+        execution.devices,
+        pytest_args,
+        skipped_devices=execution.skipped_devices,
+    )
     if options.allure_results_dir:
         write_allure_environment(options.allure_results_dir, execution.settings, execution.devices)
 
@@ -274,7 +308,8 @@ def _print_devices(devices: tuple[AndroidDeviceSettings, ...]) -> None:
     for device in devices:
         print(
             f"{device.name}\tudid={device.udid or '-'}\tappium_port={device.appium_port}\tsystem_port={device.system_port}\t"
-            f"chromedriver_port={device.chromedriver_port or '-'}\tmjpeg_server_port={device.mjpeg_server_port or '-'}"
+            f"chromedriver_port={device.chromedriver_port or '-'}\tmjpeg_server_port={device.mjpeg_server_port or '-'}\t"
+            f"source={device.source}"
         )
 
 
@@ -291,6 +326,15 @@ def _validate_parallel_args(args: list[str], devices: tuple[AndroidDeviceSetting
         LOGGER.warning("Selected %s devices but only %s xdist workers configured.", len(devices), workers)
     elif workers is not None and workers > len(devices):
         LOGGER.info("Selected %s devices with %s xdist workers; extra workers may be idle.", len(devices), workers)
+
+
+def _uses_connected_device_discovery(options: RunnerOptions) -> bool:
+    # 无参数本地运行默认发现当前在线设备；显式 --all-devices 才严格跑配置内全部设备。
+    return options.connected_devices or (
+        not options.all_devices
+        and not options.skip_offline_devices
+        and not options.device_selectors
+    )
 
 
 def _allure_executable() -> str | None:
@@ -315,6 +359,8 @@ def _create_runner_parser() -> argparse.ArgumentParser:
     parser.add_argument("--appium-config", default="config/appium.yaml")
     parser.add_argument("--device", action="append", default=[])
     parser.add_argument("--all-devices", action="store_true")
+    parser.add_argument("--connected-devices", action="store_true")
+    parser.add_argument("--skip-offline-devices", action="store_true")
     parser.add_argument("--framework-log-level", default="INFO")
     parser.add_argument("--report-dir", default="reports/latest")
     parser.add_argument("--allure-results-dir")

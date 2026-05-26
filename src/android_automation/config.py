@@ -27,6 +27,14 @@ class AppiumServiceSettings:
 
 
 @dataclass(frozen=True)
+class DevicePortDefaults:
+    appium_port_start: int
+    system_port_start: int
+    chromedriver_port_start: int
+    mjpeg_server_port_start: int
+
+
+@dataclass(frozen=True)
 class AndroidDeviceSettings:
     name: str
     udid: str | None
@@ -36,6 +44,7 @@ class AndroidDeviceSettings:
     chromedriver_port: int | None
     mjpeg_server_port: int | None
     server_url: str | None = None
+    source: str = "configured"
 
 
 @dataclass(frozen=True)
@@ -58,6 +67,7 @@ class AndroidSettings:
     android_home: Path | None
     smoke_accessibility_id: str | None
     appium_service: AppiumServiceSettings
+    device_port_defaults: DevicePortDefaults
     devices: tuple[AndroidDeviceSettings, ...]
 
 
@@ -71,6 +81,7 @@ def load_settings(config_path: Path | str | None = None, validate_app: bool = Tr
     smoke = data.get("smoke", {})
     appium = data.get("appium", {})
     appium_service = _load_appium_service_settings(appium)
+    device_port_defaults = _load_device_port_defaults(data, android, appium_service)
 
     app_value = _env_or_default("ANDROID_APP_PATH", android.get("app", ""))
     settings = AndroidSettings(
@@ -107,6 +118,7 @@ def load_settings(config_path: Path | str | None = None, validate_app: bool = Tr
             _env_or_default("SMOKE_ACCESSIBILITY_ID", smoke.get("accessibility_id", ""))
         ),
         appium_service=appium_service,
+        device_port_defaults=device_port_defaults,
         devices=_load_devices(android, appium_service),
     )
 
@@ -220,6 +232,45 @@ def _load_appium_service_settings(appium: dict[str, Any]) -> AppiumServiceSettin
             _env_or_default("APPIUM_STOP_TIMEOUT_SECONDS", appium.get("stop_timeout_seconds", 10))
         ),
         executable=_resolve_optional_path(_env_or_default("APPIUM_EXECUTABLE", appium.get("executable", ""))),
+    )
+
+
+def _load_device_port_defaults(
+    data: dict[str, Any],
+    android: dict[str, Any],
+    appium_service: AppiumServiceSettings,
+) -> DevicePortDefaults:
+    """读取动态发现设备的端口池起点；未配置时沿用当前项目默认端口。"""
+    raw_defaults = data.get("device_defaults") or android.get("device_defaults") or {}
+    if not isinstance(raw_defaults, dict):
+        raise ConfigError("device_defaults must be a mapping")
+
+    return DevicePortDefaults(
+        appium_port_start=_to_port(
+            _env_or_default(
+                "ANDROID_APPIUM_PORT_START",
+                raw_defaults.get("appium_port_start", appium_service.base_port),
+            ),
+            "ANDROID_APPIUM_PORT_START",
+        ),
+        system_port_start=_to_port(
+            _env_or_default("ANDROID_SYSTEM_PORT_START", raw_defaults.get("system_port_start", 8200)),
+            "ANDROID_SYSTEM_PORT_START",
+        ),
+        chromedriver_port_start=_to_port(
+            _env_or_default(
+                "ANDROID_CHROMEDRIVER_PORT_START",
+                raw_defaults.get("chromedriver_port_start", 9515),
+            ),
+            "ANDROID_CHROMEDRIVER_PORT_START",
+        ),
+        mjpeg_server_port_start=_to_port(
+            _env_or_default(
+                "ANDROID_MJPEG_SERVER_PORT_START",
+                raw_defaults.get("mjpeg_server_port_start", 7810),
+            ),
+            "ANDROID_MJPEG_SERVER_PORT_START",
+        ),
     )
 
 

@@ -73,7 +73,7 @@ def start_managed_appium_servers(
 
     executable = _appium_executable(settings)
     servers: list[ManagedAppiumServer] = []
-    logs_dir = resolve_log_session_dir(report_dir / "logs" / "master.log") / "appium"
+    logs_dir = resolve_log_session_dir(report_dir / "logs" / "runner.log") / "appium"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     try:

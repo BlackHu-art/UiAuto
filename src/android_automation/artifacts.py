@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import sys
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from android_automation.config import AndroidDeviceSettings, AndroidSettings
+from android_automation.logging_config import resolve_log_session_dir
 
 
 def safe_path(value: str) -> str:
@@ -19,13 +21,18 @@ def write_run_metadata(
     settings: AndroidSettings,
     devices: tuple[AndroidDeviceSettings, ...],
     pytest_args: list[str],
+    skipped_devices: tuple[Any, ...] = (),
 ) -> None:
-    """记录本次运行的参数与设备清单，便于复盘。"""
+    """记录本次运行参数、有效设备和被跳过设备，方便复盘。"""
     metadata_dir = report_dir / "metadata"
     metadata_dir.mkdir(parents=True, exist_ok=True)
     (metadata_dir / "pytest_args.txt").write_text(" ".join(pytest_args), encoding="utf-8")
     (metadata_dir / "devices.json").write_text(
         json.dumps(_device_metadata(settings, devices), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (metadata_dir / "skipped_devices.json").write_text(
+        json.dumps(_skipped_device_metadata(skipped_devices), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -74,7 +81,7 @@ def split_allure_results_by_device(
 
     result_files = sorted(allure_results_dir.glob("*-result.json"))
     for result_file in result_files:
-        # result 文件里携带设备参数，可以直接作为拆分依据。
+        # result 文件携带设备参数，可以直接作为拆分依据。
         data = _read_json(result_file)
         device_name = _device_name_from_result(data)
         if not device_name or device_name not in device_result_dirs:
@@ -135,6 +142,38 @@ def attach_session_metadata(driver_instance, device: AndroidDeviceSettings | Non
     )
 
 
+def attach_failure_logs(report_dir: Path, device_name: str, worker_id: str, tail_lines: int = 200) -> None:
+    """失败时附加当前 worker 日志片段和对应 Appium 日志位置。"""
+    import allure
+
+    _flush_log_handlers()
+    session_dir = resolve_log_session_dir(report_dir / "logs" / "runner.log")
+
+    worker_log = session_dir / f"{worker_id}.log"
+    if worker_log.exists():
+        allure.attach(
+            _tail_text(worker_log, tail_lines),
+            name=f"{worker_id}_log_tail",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+    appium_log = _appium_log_path(session_dir, device_name)
+    if appium_log is None:
+        allure.attach(
+            f"Appium log not found for device={device_name} under {session_dir / 'appium'}",
+            name="appium_log_path",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+        return
+
+    allure.attach(str(appium_log), name="appium_log_path", attachment_type=allure.attachment_type.TEXT)
+    allure.attach(
+        _tail_text(appium_log, tail_lines),
+        name=f"appium_{safe_path(device_name)}_log_tail",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+
+
 def _capture_screenshot(driver_instance, report_dir: Path, safe_device: str, safe_nodeid: str, worker_id: str) -> None:
     import allure
 
@@ -168,8 +207,21 @@ def _device_metadata(settings: AndroidSettings, devices: tuple[AndroidDeviceSett
             "system_port": device.system_port,
             "chromedriver_port": device.chromedriver_port,
             "mjpeg_server_port": device.mjpeg_server_port,
+            "source": getattr(device, "source", "configured"),
         }
         for device in devices
+    ]
+
+
+def _skipped_device_metadata(skipped_devices: tuple[Any, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": getattr(device, "name", None),
+            "udid": getattr(device, "udid", None),
+            "state": getattr(device, "state", None),
+            "reason": getattr(device, "reason", None),
+        }
+        for device in skipped_devices
     ]
 
 
@@ -225,3 +277,29 @@ def _copy_once(source_path: Path, target_dir: Path, copied_files: set[str]) -> N
         return
     shutil.copy2(source_path, target_dir / source_path.name)
     copied_files.add(source_path.name)
+
+
+def _flush_log_handlers() -> None:
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+
+
+def _tail_text(path: Path, line_count: int) -> str:
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = lines[-line_count:] if line_count > 0 else lines
+    return "\n".join(tail)
+
+
+def _appium_log_path(session_dir: Path, device_name: str) -> Path | None:
+    appium_dir = session_dir / "appium"
+    candidates = [
+        appium_dir / f"{device_name}.log",
+        appium_dir / f"{safe_path(device_name)}.log",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None

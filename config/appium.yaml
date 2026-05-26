@@ -10,6 +10,13 @@ appium:
   startup_poll_interval_seconds: 1
   stop_timeout_seconds: 10
 
+# 动态发现新设备时使用的端口池起点；已在 devices 中配置的设备优先复用固定端口。
+device_defaults:
+  appium_port_start: 4723
+  system_port_start: 8200
+  chromedriver_port_start: 9515
+  mjpeg_server_port_start: 7810
+
 android:
   platform_name: "Android"
   automation_name: "UiAutomator2"

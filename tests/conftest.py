@@ -8,7 +8,7 @@ import pytest
 from selenium.common.exceptions import WebDriverException
 
 from android_automation.appium_service import start_managed_appium_servers
-from android_automation.artifacts import attach_session_metadata, capture_failure_artifacts
+from android_automation.artifacts import attach_failure_logs, attach_session_metadata, capture_failure_artifacts
 from android_automation.config import ConfigError
 from android_automation.logging_config import setup_logging
 from android_automation.runtime import load_execution_context
@@ -36,6 +36,16 @@ def pytest_addoption(parser):
         help="Run each driver test against every configured Android device.",
     )
     parser.addoption(
+        "--connected-devices",
+        action="store_true",
+        help="Run against all currently connected adb devices.",
+    )
+    parser.addoption(
+        "--skip-offline-devices",
+        action="store_true",
+        help="Skip selected configured devices that are not currently online.",
+    )
+    parser.addoption(
         "--framework-log-level",
         action="store",
         default="INFO",
@@ -51,7 +61,11 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     report_dir = Path(config.getoption("--report-dir"))
-    # xdist worker 与 master 使用统一的按日期日志目录。
+    if config.getoption("--connected-devices") and (
+        config.getoption("--all-devices") or config.getoption("--device")
+    ):
+        raise pytest.UsageError("--connected-devices cannot be combined with --all-devices or --device")
+    # xdist worker 与 runner 使用统一的按日期日志目录。
     setup_logging(config.getoption("--framework-log-level"), report_dir / "logs" / f"{_worker_id(config)}.log")
 
 
@@ -63,6 +77,8 @@ def execution_context(request):
             config_path=request.config.getoption("--appium-config"),
             device_selectors=request.config.getoption("--device"),
             all_devices=request.config.getoption("--all-devices"),
+            connected_devices=request.config.getoption("--connected-devices"),
+            skip_offline_devices=request.config.getoption("--skip-offline-devices"),
         )
         execution.apply_environment()
         LOGGER.info(
@@ -151,6 +167,8 @@ def pytest_generate_tests(metafunc):
             config_path=metafunc.config.getoption("--appium-config"),
             device_selectors=metafunc.config.getoption("--device"),
             all_devices=metafunc.config.getoption("--all-devices"),
+            connected_devices=metafunc.config.getoption("--connected-devices"),
+            skip_offline_devices=metafunc.config.getoption("--skip-offline-devices"),
             validate_app=False,
         )
     except ConfigError as exc:
@@ -187,10 +205,11 @@ def pytest_runtest_makereport(item, call):
     try:
         capture_failure_artifacts(driver_instance, report_dir, device_name, item.nodeid, worker_id)
         attach_session_metadata(driver_instance, device, item.nodeid, worker_id)
+        attach_failure_logs(report_dir, device_name, worker_id)
         LOGGER.error("Captured failure artifacts for %s on %s", item.nodeid, device_name)
     except Exception:
         LOGGER.warning("Failed to capture failure artifacts", exc_info=True)
 
 
 def _worker_id(config) -> str:
-    return getattr(config, "workerinput", {}).get("workerid", "master")
+    return getattr(config, "workerinput", {}).get("workerid", "local")
